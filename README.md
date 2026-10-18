@@ -92,7 +92,7 @@ Quasar uses its own command names. The table below maps them to familiar Git con
 | `git init` | `ready` | Initialize a repository |
 | `git add` | `save` | Stage a file or directory |
 | `git commit` | `done` | Create a commit |
-| Checkout-like operation | `branch` | Switch branches; use `-b` to create and switch |
+| `git checkout` | `branch` | Switch branches; use `-b` to create and switch |
 | `git branch` | `vers` | List branches or create a branch |
 | `git status` | `state` | Show repository changes |
 | `git log` | `history` | Display commit history |
