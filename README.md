@@ -303,7 +303,7 @@ Quasar stores resources under `.quasar/resources`, organized by hash prefix. Ser
 
 ## Repository Layout
 
-A Quasar repository has an internal structure similar to this:
+A Quasar repository has an internal structure similar to this once you run the 'python3 main.py' and other quasar commands:
 
 ```text
 project/
