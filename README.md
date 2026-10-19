@@ -28,6 +28,7 @@ The goal is to understand how version control works internally by building its c
 
 ## Built With
 
+<<<<<<< HEAD
 | Technology | Purpose |
 |---|---|
 | Python | Core implementation and command-line interface |
@@ -39,6 +40,20 @@ The goal is to understand how version control works internally by building its c
 | `time` | Record commit timestamps |
 
 The implementation uses Python’s standard library and does not require external packages.
+=======
+  Technology   Purpose
+  ------------ ------------------------------------------------
+  Python       Core implementation and command-line interface
+  `argparse`   Parsing commands and options
+  `pathlib`    Filesystem and path handling
+  `hashlib`    SHA-1 object hashes
+  `zlib`       Compressing stored objects
+  `json`       Persisting the staging index
+  `time`       Commit timestamps
+  `colorama`   Colored terminal output
+
+Install the external dependency with `python3 -m pip install colorama`.
+>>>>>>> cf85920 (Added new colored terminal version)
 
 ---
 
@@ -46,14 +61,22 @@ The implementation uses Python’s standard library and does not require externa
 
 ### Requirements
 
+<<<<<<< HEAD
 - Python 3
 - A terminal
 - Basic familiarity with command-line tools
+=======
+-   Python 3
+-   The `colorama` Python package
+-   A terminal
+-   Basic familiarity with command-line tools
+>>>>>>> cf85920 (Added new colored terminal version)
 
 Check your Python installation:
 
 ```bash
 python3 --version
+python3 -m pip install colorama
 ```
 
 ### Get the project
@@ -141,7 +164,16 @@ Specify an author:
 python3 main.py done -m "Add initial ML examples" --author "Your Name <you@example.com>"
 ```
 
+<<<<<<< HEAD
 A commit records a tree snapshot, parent commit (when present), author and committer metadata, timestamp, and message. After a successful commit, Quasar clears the staging index.
+=======
+A commit records a tree snapshot, its parent commit (when present),
+author and committer metadata, a timestamp, and a message. After a
+successful commit, Quasar keeps the index aligned with the new snapshot.
+When you save a file later, the index starts with the current commit's
+files, so saving one file does not mark the other committed files as
+deleted.
+>>>>>>> cf85920 (Added new colored terminal version)
 
 ### `vers` — List or create branches
 
@@ -181,7 +213,16 @@ Quasar uses branch references to identify the commit associated with each branch
 python3 main.py state
 ```
 
+<<<<<<< HEAD
 The status command compares the latest commit, staging index, and working directory. It can report staged changes, unstaged modifications, untracked files, and deletions.
+=======
+The status command compares Quasar's latest commit, staging index, and
+working directory. It can report staged changes, unstaged modifications,
+untracked files, and working-tree deletions. Quasar maintains its own
+history in `.quasar`; `state` does not show the status of a separate Git
+repository in `.git`. To start tracking a file with Quasar, stage it with
+`save`.
+>>>>>>> cf85920 (Added new colored terminal version)
 
 ### `history` — View commit history
 
@@ -272,7 +313,15 @@ Parent links connect commits into a history.
 
 ### 4. The staging index
 
+<<<<<<< HEAD
 The staging index maps repository-relative file paths to blob hashes. The `save` command updates the index; `done` builds a tree from the staged entries and records a commit.
+=======
+The staging index maps repository-relative file paths to blob hashes.
+It represents the snapshot being prepared for the next commit and begins
+with the current commit's files. The `save` command adds or updates paths
+in this snapshot; `done` builds a tree from it and records a commit. The
+index remains aligned with that snapshot after a successful commit.
+>>>>>>> cf85920 (Added new colored terminal version)
 
 ### 5. Branch references and `HEAD`
 

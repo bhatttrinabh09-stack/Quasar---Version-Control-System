@@ -2,6 +2,20 @@ import argparse, json, hashlib, zlib
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 import time
+from colorama import Fore
+
+
+def print_success(message: str) -> None:
+    print(Fore.GREEN + message + Fore.RESET)
+
+
+def print_error(message: str) -> None:
+    print(Fore.RED + message + Fore.RESET)
+
+
+def print_notice(message: str) -> None:
+    print(Fore.YELLOW + message + Fore.RESET)
+
 
 class QuasarResource:
     def __init__(self, resource_type: str, content: bytes):
@@ -189,7 +203,10 @@ class Repository:
         
         self.save_index({})
 
-        print(f"An empty Quasar Repository is ready in {self.quasar_dir}")
+        print_success(
+            f"An empty Quasar Repository is ready in "
+            f"{Fore.WHITE}{self.quasar_dir}{Fore.GREEN}"
+        )
         return True
 
     def store_resource(self, resource: QuasarResource):
@@ -225,6 +242,28 @@ class Repository:
     def save_index(self, index: Dict[str, str]):
         self.index_file.write_text(json.dumps(index, indent=2))
 
+    def get_committed_index(self) -> Dict[str, str]:
+        """Return the current branch snapshot as a path-to-blob mapping."""
+        commit_hash = self.get_branch_commit(self.get_current_branch())
+        if not commit_hash:
+            return {}
+        commit_obj = self.load_resource(commit_hash)
+        if commit_obj.type != "commit":
+            raise ValueError("Branch reference does not point to a commit")
+        commit = Commit.deserialize_commit(commit_obj.content)
+        return self.build_index_from_tree(commit.tree_hash)
+
+    def get_staging_index(self) -> Dict[str, str]:
+        """Load the staged snapshot, including files from the current commit.
+
+        Older versions cleared the index after a commit. Merge the current
+        snapshot back in so staging one new file cannot stage old files for
+        deletion accidentally.
+        """
+        index = self.get_committed_index()
+        index.update(self.load_index())
+        return index
+
     def save_file(self, path: str):
         if self._is_internal_path(path):
             raise ValueError(f"Cannot save repository metadata: {path}")
@@ -248,12 +287,12 @@ class Repository:
         #store the blob object in .git/object
         blob_hash = self.store_resource(blob)
         #update index to include file
-        index = self.load_index()
+        index = self.get_staging_index()
         index[path] = blob_hash
 
         self.save_index(index)
 
-        print(f"Saved the {path}")
+        print_success(f"Saved the {Fore.WHITE}{path}{Fore.GREEN}")
 
     def save_dir(self, path: str):
         full_path = (self.path / path).resolve()
@@ -265,7 +304,7 @@ class Repository:
         if not full_path.is_dir():
             raise ValueError(f"{path} is not a directory")
 
-        index = self.load_index()
+        index = self.get_staging_index()
         file_cnt = 0
 
         for file in full_path.rglob("*"):
@@ -284,9 +323,14 @@ class Repository:
 
         self.save_index(index)
         if file_cnt:
-            print(f"Added {file_cnt} files from directory {path}")
+            print_success(
+                f"Added {file_cnt} files from directory "
+                f"{Fore.WHITE}{path}{Fore.GREEN}"
+            )
         else:
-            print(f"Directory {path} contains no files")
+            print_notice(
+                f"Directory {Fore.WHITE}{path}{Fore.YELLOW} contains no files"
+            )
 
     def save_path(self, path: str) -> None:
         full_path = self.path / path
@@ -401,7 +445,7 @@ class Repository:
         #create a tree object
         index = self.load_index()
         if not index:
-            print("Nothing to commit: index is empty")
+            print_notice("Nothing to commit: index is empty")
             return None
 
         tree_hash = self.create_tree_from_index()
@@ -416,7 +460,7 @@ class Repository:
                 raise ValueError("Branch reference does not point to a commit")
             parent_data = Commit.deserialize_commit(parent_resource.content)
             if tree_hash == parent_data.tree_hash:
-                print("Nothing to commit: no changes detected")
+                print_notice("Nothing to commit: no changes detected")
                 return None
         
 
@@ -430,8 +474,10 @@ class Repository:
 
         commit_hash = self.store_resource(commit)
         self.set_branch_commit(current_branch, commit_hash)
-        self.save_index({})
-        print(f"Created commit {commit_hash} on branch {current_branch}")
+        # Keep the index aligned with the committed snapshot. Clearing it
+        # makes every file in the new commit look like a staged deletion.
+        self.save_index(index)
+        print_success(f"Created commit {commit_hash} on branch {current_branch}")
         return commit_hash
 
     def get_files_from_tree_rec(self, tree_hash: str, prefix: str=""):
@@ -448,7 +494,7 @@ class Repository:
                     subtree_files = self.get_files_from_tree_rec(obj_hash, f"{full_name}/")
                     files.update(subtree_files)
         except Exception as e:
-            print(f"Warning Could not read the tree {tree_hash: {e}}")
+            print_notice(f"Warning: Could not read the tree {tree_hash}: {e}")
 
         return files
 
@@ -473,21 +519,21 @@ class Repository:
                 }
         if create_branch:
             if branch_file.exists():
-                print(f"Branch '{mbranch}' already exists.")
+                print_error(f"Branch '{mbranch}' already exists.")
                 return
             if not prev_commit_hash:
-                print("No commits yet, cannot create a new branch.")
+                print_error("No commits yet, cannot create a new branch.")
                 return
             self.set_branch_commit(mbranch, prev_commit_hash)
-            print(f"Created new branch '{mbranch}'")
+            print_success(f"Created new branch '{mbranch}'")
         elif not branch_file.exists():
-            print(f"Branch '{mbranch}' not found.")
+            print_error(f"Branch '{mbranch}' not found.")
             return
         if mbranch == prev_branch:
-            print(f"Already on branch '{mbranch}'.")
+            print_notice(f"Already on branch '{mbranch}'.")
             return
         if self.load_index():
-            print("Cannot switch branches: staged changes would be lost.")
+            print_error("Cannot switch branches: staged changes would be lost.")
             return
 
         # Protect tracked edits and untracked files from checkout overwrites.
@@ -500,7 +546,7 @@ class Repository:
             for rel_path in files_to_clr:
                 file_path = self.path / rel_path
                 if not file_path.is_file() or BLOB(file_path.read_bytes()).hash() != current_index.get(rel_path):
-                    print("Cannot switch branches: working tree has local changes.")
+                    print_error("Cannot switch branches: working tree has local changes.")
                     return
         target_commit_hash = self.get_branch_commit(mbranch)
         target_index = {}
@@ -524,12 +570,15 @@ class Repository:
         }
         for rel_path in set(target_index) - set(current_tracked):
             if (self.path / rel_path).exists():
-                print(f"Cannot switch branches: untracked file would be overwritten: {rel_path}")
+                print_error(
+                    "Cannot switch branches: untracked file would be overwritten: "
+                    f"{Fore.WHITE}{rel_path}{Fore.RED}"
+                )
                 return
         self.head_file.write_text(f"ref: refs/heads/{mbranch}\n")
         self.resources_working_dir(mbranch, files_to_clr)
 
-        print(f"Switched to branch: {mbranch}")
+        print_success(f"Switched to branch: {mbranch}")
 
     def restore_tree(self, tree_hash: str, path: Path):
         tree_obj = self.load_resource(tree_hash)
@@ -566,19 +615,20 @@ class Repository:
 
         if target_commit.tree_hash:
             self.restore_tree(target_commit.tree_hash, self.path)
-            self.save_index({})
+            # A checkout leaves the index matching the checked-out commit.
+            self.save_index(self.build_index_from_tree(target_commit.tree_hash))
 
     def vers(self, branch_name: str, delete: bool = False):
         if delete and branch_name:
             branch_file = self._branch_file(branch_name)
             if branch_name == self.get_current_branch():
-                print("Cannot delete the current branch.")
+                print_error("Cannot delete the current branch.")
                 return
             if branch_file.exists():
                 branch_file.unlink()
-                print(f"Delete {branch_name} branch")
+                print_success(f"Deleted {branch_name} branch")
             else:
-                print(f"Branch- {branch_name} not found")
+                print_error(f"Branch {branch_name} not found")
 
             return
         
@@ -589,9 +639,9 @@ class Repository:
             current_commit = self.get_branch_commit(current_branch)
             if current_commit:
                 self.set_branch_commit(branch_name, current_commit)
-                print(f"Created branch {branch_name}")
+                print_success(f"Created branch {branch_name}")
             else:
-                print("No commits yet, cannot create a new branch")
+                print_error("No commits yet, cannot create a new branch")
         else:
             branches = []
             for branch_file in self.heads_dir.iterdir():
@@ -607,7 +657,7 @@ class Repository:
         commit_hash = self.get_branch_commit(current_branch)
 
         if not commit_hash:
-            print("No commits yet")
+            print_notice("No commits yet")
             return
 
         count = 0
@@ -638,7 +688,7 @@ class Repository:
                     subindex = self.build_index_from_tree(obj_hash, f"{full_name}/")
                     index.update(subindex)
         except Exception as e:
-            print(f"Warning: Could not read tree {tree_hash}: {e}")
+            print_notice(f"Warning: Could not read tree {tree_hash}: {e}")
 
         return index
 
@@ -679,8 +729,13 @@ class Repository:
                         if not self._is_internal_path(path)
                     }
             except Exception as e:
-                print(f"Error loading latest commit: {e}")
+                print_error(f"Error loading latest commit: {e}")
                 return
+
+        # Older Quasar versions cleared the index after committing. Merge
+        # the commit snapshot so existing repositories do not report staged
+        # additions as deletions of every previously committed file.
+        index = {**last_index_file, **index}
 
         working_files = {}
         for item in self.get_all_files():
@@ -730,22 +785,22 @@ class Repository:
                     untracked_files.append(file_path)
 
         if staged_files:
-            print("\nChanges to be committed:")
+            print(Fore.YELLOW + "\nChanges to be committed:" + Fore.RESET)
             for status, file_path in staged_files:
                 print(f"    {status}: {file_path}")
 
         if unstaged_files:
-            print("\nChanges not staged for commit:")
+            print(Fore.YELLOW + "\nChanges not staged for commit:" + Fore.RESET)
             for file_path in unstaged_files:
                 print(f"    Modified: {file_path}")
 
         if deleted_files:
-            print("\nChanges not staged for commit:")
+            print(Fore.YELLOW + "\nChanges not staged for commit:" + Fore.RESET)
             for file_path in deleted_files:
                 print(f"    Deleted: {file_path}")
 
         if untracked_files:
-            print("\nUntracked files:")
+            print(Fore.RED + "\nUntracked files:" + Fore.RESET)
             for file_path in untracked_files:
                 print(f"    {file_path}")
 
@@ -755,7 +810,7 @@ class Repository:
             or deleted_files
             or untracked_files
         ):
-            print("\nWorking tree clean.")
+            print_success("\nWorking tree clean.")
 
 
 def main():
@@ -768,34 +823,34 @@ def main():
     )
 
     #INIT Command (ready)
-    ready_parser = subparser.add_parser("ready", help="Initialize a new repository")
+    ready_parser = subparser.add_parser("ready", help=Fore.BLUE + "Initialize a new repository" + Fore.RESET)
 
     #ADD Command (save)
-    save_parser = subparser.add_parser("save", help="Add files and directories")
-    save_parser.add_argument("paths", nargs='+', help="Files and directories to save")
+    save_parser = subparser.add_parser("save", help=Fore.BLUE + "Add files and directories" + Fore.RESET)
+    save_parser.add_argument("paths", nargs='+', help=Fore.BLUE + "Files and directories to save" + Fore.RESET)
 
     #COMMIT Command (done)
-    done_parser = subparser.add_parser("done", help="Commit your changes")
-    done_parser.add_argument("-m", "--message", help="Commit Message", required=True)
-    done_parser.add_argument("--author", "-a", help="Author name and email")
+    done_parser = subparser.add_parser("done", help=Fore.BLUE + "Commit your changes" + Fore.RESET)
+    done_parser.add_argument("-m", "--message", help=Fore.BLUE + "Commit Message" + Fore.RESET, required=True)
+    done_parser.add_argument("--author", "-a", help=Fore.BLUE + "Author name and email" + Fore.RESET)
 
     #CHECKOUT Command (branch)
-    branch_parser = subparser.add_parser("branch", help="Create another branch or move to one")
-    branch_parser.add_argument("mbranch", help="Branch to switch to")
-    branch_parser.add_argument("-b", "--create-branch", action="store_true", help="Manage Branch")
+    branch_parser = subparser.add_parser("branch", help=Fore.BLUE + "Create another branch or move to one" + Fore.RESET)
+    branch_parser.add_argument("mbranch", help=Fore.BLUE + "Branch to switch to" + Fore.RESET)
+    branch_parser.add_argument("-b", "--create-branch", action="store_true", help=Fore.BLUE + "Manage Branch" + Fore.RESET)
 
     #BRANCH Command (vers)
-    vers_parser = subparser.add_parser("vers", help="List/Manage Branches")
-    vers_parser.add_argument("-b", "--branch", action="store_true", help="create new branch")
-    vers_parser.add_argument("-d", "--delete", action="store_true", help="delete the branch")
-    vers_parser.add_argument("name", nargs="?", help="list the branch")
+    vers_parser = subparser.add_parser("vers", help=Fore.BLUE + "List/Manage Branches" + Fore.RESET)
+    vers_parser.add_argument("-b", "--branch", action="store_true", help=Fore.BLUE + "create new branch" + Fore.RESET)
+    vers_parser.add_argument("-d", "--delete", action="store_true", help=Fore.BLUE + "delete the branch" + Fore.RESET)
+    vers_parser.add_argument("name", nargs="?", help=Fore.BLUE + "list the branch" + Fore.RESET)
 
     #LOG Command (history)
-    history_parser = subparser.add_parser("history", help="History of all commits")
-    history_parser.add_argument("-n", "--max-count", type=int, default=10, help="Limits commits shown")
+    history_parser = subparser.add_parser("history", help=Fore.BLUE + "History of all commits" + Fore.RESET)
+    history_parser.add_argument("-n", "--max-count", type=int, default=10, help=Fore.BLUE + "Limits commits shown" + Fore.RESET)
 
     #STATUS Command (state)
-    state_parser = subparser.add_parser("state", help="Show repository status")
+    state_parser = subparser.add_parser("state", help=Fore.BLUE + "Show repository status" + Fore.RESET)
 
     args = parser.parse_args()
 
@@ -808,12 +863,12 @@ def main():
     try:
         if args.command == "ready":
             if not repo.ready():
-                print("Repository already exists.")
+                print_notice("Repository already exists.")
                 return
 
         elif args.command == "save":
             if not repo.quasar_dir.exists():
-                print("Not a Quasar Directory")
+                print_error("Not a Quasar Directory")
                 return
 
             for path in args.paths:
@@ -821,37 +876,37 @@ def main():
 
         elif args.command == "done":
             if not repo.quasar_dir.exists():
-                print("Not a Quasar Directory")
+                print_error("Not a Quasar Directory")
                 return
             author = args.author or "Quasar User <user@quasar.com>"
             repo.done(args.message, author=author)
 
         elif args.command == "branch":
             if not repo.quasar_dir.exists():
-                print("Not a Quasar Directory")
+                print_error("Not a Quasar Directory")
                 return
             repo.branch(args.mbranch, args.create_branch)
 
         elif args.command == "vers":
             if not repo.quasar_dir.exists():
-                print("Not a Quasar Directory")
+                print_error("Not a Quasar Directory")
                 return
             repo.vers(args.name, args.delete)
 
         elif args.command == "history":
             if not repo.quasar_dir.exists():
-                print("Not a Quasar Directory")
+                print_error("Not a Quasar Directory")
                 return
             repo.history(args.max_count)
 
         elif args.command == "state":
             if not repo.quasar_dir.exists():
-                print("Not a Quasar Directory")
+                print_error("Not a Quasar Directory")
                 return
             repo.state()
             
     except (OSError, ValueError, zlib.error, json.JSONDecodeError) as exc:
-        parser.exit(1, f"quasar: {exc}\n")
+        parser.exit(1, f"{Fore.RED}quasar: {exc}{Fore.RESET}\n")
 
 
 if __name__ == "__main__":
