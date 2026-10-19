@@ -524,31 +524,35 @@ class Repository:
             if not prev_commit_hash:
                 print_error("No commits yet, cannot create a new branch.")
                 return
-            self.set_branch_commit(mbranch, prev_commit_hash)
-            print_success(f"Created new branch '{mbranch}'")
         elif not branch_file.exists():
             print_error(f"Branch '{mbranch}' not found.")
             return
         if mbranch == prev_branch:
             print_notice(f"Already on branch '{mbranch}'.")
             return
-        if self.load_index():
-            print_error("Cannot switch branches: staged changes would be lost.")
-            return
-
         # Protect tracked edits and untracked files from checkout overwrites.
+        current_index = {}
         if prev_commit_hash:
             current_index = {
                 path: blob_hash
                 for path, blob_hash in self.build_index_from_tree(prev_commit.tree_hash).items()
                 if not self._is_internal_path(path)
             }
+        staged_index = self.load_index()
+        if staged_index and staged_index != current_index:
+            print_error("Cannot switch branches: staged changes would be lost.")
+            return
+
+        if prev_commit_hash:
             for rel_path in files_to_clr:
                 file_path = self.path / rel_path
                 if not file_path.is_file() or BLOB(file_path.read_bytes()).hash() != current_index.get(rel_path):
                     print_error("Cannot switch branches: working tree has local changes.")
                     return
-        target_commit_hash = self.get_branch_commit(mbranch)
+        target_commit_hash = (
+            prev_commit_hash if create_branch
+            else self.get_branch_commit(mbranch)
+        )
         target_index = {}
         if target_commit_hash:
             target_resource = self.load_resource(target_commit_hash)
@@ -575,6 +579,9 @@ class Repository:
                     f"{Fore.WHITE}{rel_path}{Fore.RED}"
                 )
                 return
+        if create_branch:
+            self.set_branch_commit(mbranch, prev_commit_hash)
+            print_success(f"Created new branch '{mbranch}'")
         self.head_file.write_text(f"ref: refs/heads/{mbranch}\n")
         self.resources_working_dir(mbranch, files_to_clr)
 
